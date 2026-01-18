@@ -4,8 +4,7 @@ import os
 import pandas as pd
 import random
 import instaloader
-import glob
-import csv
+import json
 import argparse
 import mysql.connector
 
@@ -62,11 +61,31 @@ if __name__ == '__main__':
     comments_count = args.limit
 
     #connect database
-    mydb = mysql.connector.connect(host="140.109.171.243",
-                                   user="tingyang",
-                                   port="3306",
-                                   password="applegnl",
-                                   database="CDNA")
+
+    # read DB connection
+    host = ""
+    userName = ""
+    port = ""
+    password = ""
+    dbName = ""
+
+    # 讀取 JSON 設定檔
+with open("db_config.json", "r", encoding="utf-8") as f:
+    config = json.load(f)
+
+    host = config["host"]
+    userName = config["user"]
+    port = config["port"]
+    password = config["password"]
+    dbName = config["database"]
+    
+    mydb = mysql.connector.connect(
+        host=host,
+        user=userName,
+        port=port,
+        password=password,
+        database=dbName
+    )
 
     mycursor = mydb.cursor()
     mycursor.execute("""START TRANSACTION;""")

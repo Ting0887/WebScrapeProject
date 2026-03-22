@@ -1,29 +1,41 @@
-import requests
 from bs4 import BeautifulSoup
-import time
 import os
-import datetime
-import json
-import re
+import sys
+from pathlib import Path
 
-def EpochTime(url,cate,cate1,cate2):
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import build_end_date, create_session, write_json_records
+
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
+
+def EpochTime(session, url, cate, cate1, cate2, end_date):
     article = []
     num = 1
     while True:
         base_url = url + cate1 + '_' + str(num) + '.htm'
-        res = requests.get(base_url)
+        res = session.get(base_url, timeout=20)
         print(base_url)
         soup = BeautifulSoup(res.text,'lxml')
-        items = soup.find_all('div','posts-list')[0].find_all('li')
+        posts_list = soup.find_all('div','posts-list')
+        if not posts_list:
+            break
+
+        items = posts_list[0].find_all('li')
+        last_date_time = ''
         for item in items:
             link = extract_link(item)
             print(link)
             label = extract_label(item)
 
-            resp = requests.get(link)
+            resp = session.get(link, timeout=20)
             soup = BeautifulSoup(resp.text,'lxml')
             title = extract_title(soup)
             date_time = extract_date(soup)
+            last_date_time = date_time
             content = extract_content(soup)
             keyword = extract_keyword(soup)
             if date_time < end_date:
@@ -32,7 +44,7 @@ def EpochTime(url,cate,cate1,cate2):
                 article.append({'date_time':date_time,'title':title,
                                 'label':label,'link':link,
                                 'content':content,'keyword':keyword})
-        if date_time < end_date:
+        if last_date_time and last_date_time < end_date:
             break
         else:
             num += 1
@@ -75,8 +87,8 @@ def extract_content(soup):
         contents = soup.find_all('div',{'itemprop':'articleBody'})[0].find_all('p')
         for c in contents:
             content += c.text
-    except:
-        print(e)
+    except Exception:
+        pass
     return content
 
 def extract_keyword(soup):
@@ -90,22 +102,20 @@ def extract_keyword(soup):
     return keyword
 
 def outputjson(article,cate2):
-    #bulid folder by yyyy-mm
-    folder_path = f'/home/ftp_246/data_1/news_data/EpochTimes/{cate2}/' + time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-
-    filename = 'epoch_' + cate2 + time.strftime('%Y%m%d') + '.json'
-    with open(folder_path +'/'+ filename,'w',encoding='utf8') as jf:
-        json.dump(article,jf,ensure_ascii=False,indent=2)
-    jf.close()
+    file_path = write_json_records(
+        records=article,
+        source_name='EpochTimes',
+        category=cate2,
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='epoch',
+    )
+    print(f"saved: {file_path}")
         
 if __name__ == '__main__':
-    start_date = datetime.datetime.today()
-    d = datetime.timedelta(days = 1)
-    end_date = (start_date - d).strftime('%Y-%m-%d')
+    end_date = build_end_date(days_back=1)
     print(end_date)
     url = 'https://www.epochtimes.com/b5/'
+    session = create_session()
 
     cates=  [('台灣社會','ncid1077890','society'),
              ('台灣政治','ncid1077884','politics'),
@@ -114,4 +124,4 @@ if __name__ == '__main__':
              ('科技動向','ncid1185664','tech')
             ]
     for cate,cate1,cate2 in cates:
-        EpochTime(url,cate,cate1,cate2)
+        EpochTime(session, url, cate, cate1, cate2, end_date)

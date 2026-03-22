@@ -1,39 +1,45 @@
-import requests
-from bs4 import BeautifulSoup
-from datetime import date
 import datetime
 import time
-import glob
-import json
 import os
+import sys
+from pathlib import Path
 
-headers = {"user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-def scrape_link(category,label):
+from News.common.scraper_utils import build_end_date, create_session, get_soup, write_json_records
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
+
+def scrape_link(session, category, label, end_date):
     urls = []
     page = 1
-    article = {}
     while True:
         if page != 1:
             page_link = f"https://cnews.com.tw/category/{category}/page/{page}/"
         elif page == 1:
             page_link = f"https://cnews.com.tw/category/{category}/"
-        res =requests.get(page_link,headers=headers,allow_redirects=False)
         print(page_link)
         try:
-            soup = BeautifulSoup(res.text,'lxml')
+            soup = get_soup(session, page_link, sleep_seconds=0.2)
             figures = soup.find_all('figure','special-format')
+            if not figures:
+                break
+
+            last_date = ''
             for f in figures:
                 links = f.find('a')['href']
                 print(links)
                 if '/category/' in links:
                     continue
                 dates = f.find('li','date').text.strip()
+                last_date = dates
                 if dates < end_date:
                     break
                 else:
                     urls.append(links)
-            if dates < end_date:
+            if last_date and last_date < end_date:
                 break
             else:
                 page += 1
@@ -42,7 +48,7 @@ def scrape_link(category,label):
     
     if len(urls)!=0:
         write_urls_to_txt(category,urls)
-        scrape_content(category,urls)
+        scrape_content(session, category, label, urls)
         
 def write_urls_to_txt(category,urls):
     #bulid folder yyyy-mm
@@ -55,14 +61,13 @@ def write_urls_to_txt(category,urls):
             txtf.write(url+'\n')
     txtf.close()
     
-def scrape_content(category,urls):
+def scrape_content(session, category, label, urls):
     data_collect = []
-    article = {}
     for url in urls:
         print(url)
-        time.sleep(4)
+        time.sleep(1)
         try:
-            soup = BeautifulSoup(requests.get(url,headers=headers,allow_redirects=False).text,'lxml')
+            soup = get_soup(session, url, sleep_seconds=0.2)
             title = soup.find(id='articleTitle')\
                                    .find(class_='_line')\
                                    .strong.text.strip()
@@ -72,9 +77,10 @@ def scrape_content(category,urls):
             content = soup.find(
                 class_='theme-article-content').article.text.strip()
 
+            keywords = []
             try:
                 keywords = [a.text for a in soup.select('.tags > a')]
-            except:
+            except Exception:
                 pass
             article = {'url':url,'title':title,
                        'date':date,'author':author,
@@ -86,24 +92,22 @@ def scrape_content(category,urls):
             print(e)
             pass
     if len(data_collect)!=0:
-        write_to_json(data_collect)
+        write_to_json(label, data_collect)
                    
-def write_to_json(data_collect):
-    #bulid folder yyyy-mm
-    folder_path = '/home/ftp_246/data_1/news_data/CNews/json/' + label + '/' + time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-        
-    with open(folder_path + '/' + 'cnews-'+label+'-'+time.strftime('%Y-%m-%d')+'.json','w',encoding='utf-8') as jf:
-        json.dump(data_collect,jf,ensure_ascii=False,indent=2)
-    jf.close()
+def write_to_json(label, data_collect):
+    file_path = write_json_records(
+        records=data_collect,
+        source_name='CNews',
+        category=label,
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='cnews',
+    )
+    print(f"saved: {file_path}")
     
 if __name__ == '__main__':
-    
-    start_date = datetime.datetime.today() #today
-    months = datetime.timedelta(days=1)  #last month
-    end_date = (start_date - months).strftime('%Y-%m-%d')
+    end_date = build_end_date(days_back=1)
     print(end_date)
+    session = create_session()
 
     categories = [
                  ('新聞匯流', 'news'),
@@ -115,5 +119,5 @@ if __name__ == '__main__':
                  ('數位匯流', 'tech')
                  ]
 
-    for category, label in categories:
-        scrape_link(category,label)
+    for label, category in categories:
+        scrape_link(session, category, label, end_date)

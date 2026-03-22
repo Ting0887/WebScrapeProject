@@ -1,21 +1,29 @@
-import requests
 from bs4 import BeautifulSoup
-import datetime
-import time
 import os
-import json
+import sys
+from pathlib import Path
 
-def scrape_link(category):
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import create_session, ensure_dir, write_json_records
+
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
+
+def scrape_link(session, category, end_date):
     urls = []
     page = 1
     while True:
         page_link = f'https://www.thenewslens.com/category/{category}?page={page}'
-        res = requests.get(page_link)
+        res = session.get(page_link, timeout=20)
         soup = BeautifulSoup(res.text,'lxml')
         print(page_link)
         all_containers = set(soup.select('.list-container'))
         sponsored_containers = set(soup.select('.sponsoredd-container'))
         containers = all_containers - sponsored_containers
+        date_time = ''
 
         for item in containers:
             link = item.find('a')['href'] 
@@ -37,24 +45,24 @@ def scrape_link(category):
 
     if len(urls)!=0:
         write_to_txt(category,urls)
-        scrape_content(category,urls)
+        scrape_content(session, category, urls)
 
 def write_to_txt(category,urls):
-    #bulid folder yyyy-mm
-    folder_path = f'/home/ftp_246/data_1/news_data/TheNewsLens/urls/' + time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-    filename = f'tnl-{category}-'+ time.strftime('%Y-%m-%d') + '.txt'
+    import datetime
+
+    folder_path = os.path.join(OUTPUT_BASE_DIR, 'TheNewsLens', 'urls', datetime.datetime.today().strftime('%Y-%m'))
+    ensure_dir(folder_path)
+    filename = f'tnl-{category}-'+ datetime.datetime.today().strftime('%Y-%m-%d') + '.txt'
     with open(folder_path+'/'+filename,'w',encoding='utf-8') as txtf:
         for url in urls:
             txtf.write(url+'\n')
     txtf.close()
 
-def scrape_content(category,urls):
+def scrape_content(session, category, urls):
     data_collect = []
     for url in urls:
         try:
-            soup = BeautifulSoup(requests.get(url).text,'lxml')
+            soup = BeautifulSoup(session.get(url, timeout=20).text,'lxml')
             title = soup.find(class_='article-title').text.strip()
             info = soup.find(class_='article-info').text.strip().split(', ')
             date = info[0]
@@ -69,7 +77,7 @@ def scrape_content(category,urls):
             try:
                 for a in soup.find(class_='tags').select('a'):
                     keywords.append(a.text)
-            except:
+            except Exception:
                 pass
             article = {'url':url,'title':title,'date':date,
                        'label':label,'summary':summary,
@@ -83,24 +91,25 @@ def scrape_content(category,urls):
         write_to_json(category,data_collect)
 
 def write_to_json(category,data_collect):
-    #bulid folder yyyy-mm
-    folder_path = f'/home/ftp_246/data_1/news_data/TheNewsLens/json/{category}/' + time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-    filename = f'tnl-{category}-'+ time.strftime('%Y-%m-%d') + '.json'
-    with open(folder_path+'/'+filename,'w',encoding='utf-8') as jf:
-        json.dump(data_collect,jf,ensure_ascii=False,indent=2)
-    jf.close()
+    file_path = write_json_records(
+        records=data_collect,
+        source_name='TheNewsLens',
+        category=category,
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='tnl',
+    )
+    print(f"saved: {file_path}")
 
 if __name__ == '__main__':
-    start_date = datetime.datetime.today()
-    d = datetime.timedelta(days=7)
-    end_date = (start_date - d).strftime('%Y-%m-%d')
+    import datetime
+
+    session = create_session()
+    end_date = (datetime.datetime.today() - datetime.timedelta(days=7)).strftime('%Y-%m-%d')
     print(end_date)
     categories = ['world','china','health',
                   'lifestyle','politics','economy',
                   'society','science','tech']
 
     for category in categories:
-        scrape_link(category)
+        scrape_link(session, category, end_date)
 

@@ -1,5 +1,4 @@
 import os
-import json
 import time
 import datetime
 from selenium import webdriver
@@ -10,6 +9,17 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
+import sys
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import write_json_records
+
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
 
 def setup_browser():
     """设置并返回一个 Selenium WebDriver 实例。"""
@@ -82,13 +92,14 @@ def extract_keyword(soup):
     return keyword
 
 def write_to_json(article, folder):
-    folder_path = f'news_data/wealth/{folder}/{time.strftime("%Y-%m")}'
-    os.makedirs(folder_path, exist_ok=True)
-    filename = f'wealth_{folder}{time.strftime("%Y%m%d")}.json'
-    file_path = os.path.join(folder_path, filename)
-
-    with open(file_path, 'w', encoding='utf8') as jf:
-        json.dump(article, jf, ensure_ascii=False, indent=2)
+    file_path = write_json_records(
+        records=article,
+        source_name='wealth',
+        category=folder,
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='wealth',
+    )
+    print(f"saved: {file_path}")
 
 def extract_title(item):
     try:

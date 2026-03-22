@@ -1,28 +1,46 @@
-import requests
 from bs4 import BeautifulSoup
 import os
-import json
-import datetime
-import time
+import sys
+from pathlib import Path
 
-def scrape_link(url):
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import create_session, write_json_records
+
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
+
+
+def build_daai_end_date(days_back=1):
+    import datetime
+
+    target_date = datetime.datetime.today() - datetime.timedelta(days=days_back)
+    return target_date.strftime('%Y/%m/%d')
+
+def scrape_link(session, end_date):
     page = 1
     urls = []
     while True:
         url = f'https://daaimobile.com/api/news?size=500&page={page}&order=createdAt&desc=true&detail=undefined&onShelf=true'
         try:
-            res = requests.get(url)
-            r = res.json()['rows']
+            r = session.get(url, timeout=20).json()['rows']
+            if not r:
+                break
+
+            last_date_time = ''
             for item in r:
                 title = item['title']
-                date_time = item['createdAt']
+                date_time = item['createdAt'][0:10].replace('-', '/')
+                last_date_time = date_time
                 link = 'https://daaimobile.com/news/'+item['_id']
                 if date_time < end_date:
                     break
                 else:
                     print(link)
                     urls.append((title,link,date_time))
-            if date_time < end_date:
+            if last_date_time and last_date_time < end_date:
                 break
             else:
                 page += 1
@@ -31,20 +49,20 @@ def scrape_link(url):
     if len(urls)!=0:
         scrape_content(urls)
 
-def scrape_content(urls):
+def scrape_content(session, urls):
     data_collect = []
     for item in urls:
         title = item[0]
         link = item[1]
         date_time = item[2]
         try:
-            res = requests.get(link)
-        except:
+            res = session.get(link, timeout=20)
+        except Exception:
             continue
         soup = BeautifulSoup(res.text,'lxml')
         try:
             content = soup.find('div','description').text.replace('\n','').strip()
-        except:
+        except Exception:
             content = ''
 
         data_collect.append({'date_time':date_time,'title':title,
@@ -54,19 +72,16 @@ def scrape_content(urls):
         write_to_json(data_collect)
 
 def write_to_json(data_collect):
-    #bulid folder by yyyy-mm
-    folder_path = f'/home/ftp_246/data_1/news_data/Daai/realtime/' + time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-    filename = 'Daai_realtime' + time.strftime('%Y%m%d') + '.json'
-    with open(folder_path + '/' + filename,'w',encoding='utf8') as jf:
-        json.dump(data_collect,jf,ensure_ascii=False,indent=2)
-    jf.close()
+    file_path = write_json_records(
+        records=data_collect,
+        source_name='Daai',
+        category='realtime',
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='Daai',
+    )
+    print(f"saved: {file_path}")
 
 if __name__ == '__main__':
-    start_date = datetime.datetime.today()
-    d = datetime.timedelta(days = 1)
-    end_date = (start_date - d).strftime('%Y/%m/%d')
-
-    url = 'https://daaimobile.com/api/news?size=500&page=1&order=createdAt&desc=true&detail=undefined&onShelf=true'
-    scrape_link(url)
+    session = create_session()
+    end_date = build_daai_end_date(days_back=1)
+    scrape_link(session, end_date)

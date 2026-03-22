@@ -1,19 +1,31 @@
-import requests
 from bs4 import BeautifulSoup
-import json
-import time
-import datetime
 import os
+import sys
+from pathlib import Path
 
-def parse_cateurl(url,cate):
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import build_end_date, create_session, write_json_records
+
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
+
+def parse_cateurl(session, url, cate, end_date):
     page = 1
     posts = []
     while True:
         page_url = url + '/' + str(page)
         print(page_url)
-        res = requests.get(page_url,headers=headers)
+        res = session.get(page_url, timeout=20)
         soup = BeautifulSoup(res.text,'lxml')
-        bar = soup.find_all('div',{'id':'category_content'})[0].find_all('div','category_card card_thumbs_left')
+        categories = soup.find_all('div',{'id':'category_content'})
+        if not categories:
+            break
+
+        bar = categories[0].find_all('div','category_card card_thumbs_left')
+        date_time = ''
 
         for item in bar:
             label = extract_label(item)
@@ -32,7 +44,7 @@ def parse_cateurl(url,cate):
         else:
             page += 1
     if len(posts)!=0:
-        parse_info(posts,cate)
+        parse_info(session, posts, cate)
 
 def extract_label(item):
     label = ''
@@ -40,39 +52,39 @@ def extract_label(item):
         labels = item.find_all('div','tags_wrapper')[0].find_all('a')
         for l in labels:
             label += l.text+ ' '
-    except:
+    except Exception:
         pass
     return label
         
 def extract_title(item):
     try:
         title = item.find('h3','card_title').text
-    except:
+    except Exception:
         title = ''
     return title
 
 def extract_author(item):
     try:
         author = item.find('span','info_author').text
-    except:
+    except Exception:
         author = ''
     return author
 
 def extract_date(item):
     try:
         date_time = item.find('span','info_time').text
-    except:
+    except Exception:
         date_time = ''
     return date_time
 
 def extract_link(item):
     try:
         link = item.find('a','card_link link_title').get('href')
-    except:
+    except Exception:
         link = ''
     return link
 
-def parse_info(posts,cate):
+def parse_info(session, posts, cate):
     article = []
     for item in posts:
         title = item[0]
@@ -81,7 +93,7 @@ def parse_info(posts,cate):
         author = item[3]
         label = item[4]
         
-        res = requests.get(link,headers=headers)
+        res = session.get(link, timeout=20)
         soup = BeautifulSoup(res.text,'lxml')
 
         content = extract_content(soup)
@@ -100,7 +112,7 @@ def extract_content(soup):
         contents = soup.find_all('div',{'id':'CMS_wrapper'})[0].find_all('p')
         for c in contents:
             content += c.text
-    except:
+    except Exception:
         pass
     return content
 
@@ -110,28 +122,23 @@ def extract_keyword(soup):
         keywords = soup.find_all('div',{'id':'tags_list_wrapepr'})[0].find_all('a')
         for k in keywords:
             keyword += k.text + ' '
-    except:
+    except Exception:
         pass
     return keyword
 
 def write_to_json(article,cate):
-    #bulid folder by yyyy-mm
-    folder_path = f'/home/ftp_246/data_1/news_data/Storm/{cate}/' + time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-
-    filename = 'storm_' + cate + time.strftime('%Y%m%d') + '.json'
-    with open(folder_path+'/'+filename,'w',encoding='utf8') as jf:
-        json.dump(article,jf,ensure_ascii=False,indent=2)
-    jf.close()
+    file_path = write_json_records(
+        records=article,
+        source_name='Storm',
+        category=cate,
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='storm',
+    )
+    print(f"saved: {file_path}")
 
 if __name__ == '__main__':
-    start_date = datetime.datetime.today()
-    d = datetime.timedelta(days = 1)
-    end_date = (start_date - d).strftime('%Y-%m-%d %H:%M')
-    
-    headers = {"user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-               "referer": "https://www.storm.mg/category"}
+    session = create_session(headers={"referer": "https://www.storm.mg/category"})
+    end_date = build_end_date(days_back=1) + ' 00:00'
     cates = [('politics','https://www.storm.mg/category/118'),
              ('global','https://www.storm.mg/category/117'),
              ('domestic','https://www.storm.mg/category/22172'),
@@ -143,4 +150,4 @@ if __name__ == '__main__':
     
     for cate,cate1 in cates:
         url = cate1
-        parse_cateurl(url,cate)
+        parse_cateurl(session, url, cate, end_date)

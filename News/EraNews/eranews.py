@@ -1,21 +1,34 @@
-import requests
 from bs4 import BeautifulSoup
-import json
-import time
-import datetime
 import os
+import sys
+from pathlib import Path
+
+import requests
 
 requests.packages.urllib3.disable_warnings()
 
-def eranews(url):
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import build_end_date, create_session, write_json_records
+
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
+
+def eranews(session, url, cate1, cate2, end_date):
     newslink = []
     page = 19
     for num in range(0,page+1):
         cate_url = url + f'/?pp={num}0'
-        res = requests.get(cate_url,verify=False)
+        res = session.get(cate_url, verify=False, timeout=20)
         res.encoding = 'utf8'
         soup = BeautifulSoup(res.text,'lxml')
         items = soup.find_all('p','tib-title')
+        if not items:
+            break
+
+        date_f = ''
         for item in items:
             link = item.find('a')['href']
             date_f = link.split('/')[-2]
@@ -28,12 +41,12 @@ def eranews(url):
                 break
 
     if len(newslink)!=0:
-        parse_article(newslink)
+        parse_article(session, newslink, cate1, cate2)
 
-def parse_article(newslink):
+def parse_article(session, newslink, cate1, cate2):
     eradata = []
     for link in newslink:
-        res = requests.get(link,verify=False)
+        res = session.get(link, verify=False, timeout=20)
         res.encoding = 'utf8'
         if res.status_code == requests.codes.ok:
             soup = BeautifulSoup(res.text,'lxml')
@@ -42,16 +55,16 @@ def parse_article(newslink):
                 try:
                     title = item.find('h1').text
                     print(title)
-                except:
+                except Exception:
                     title = ''
                 try:
                     date_time = item.find('span','time').text
-                except:
+                except Exception:
                     date_time = ''
                 label = cate1
                 try:
                     content = item.find('div','article-main').text
-                except:
+                except Exception:
                     content = ''
                 
                 keyword = ''
@@ -63,23 +76,21 @@ def parse_article(newslink):
                                 'content':content,      
                                 'keyword':keyword})
     if len(eradata)!=0:
-        outputjson(eradata)
+        outputjson(eradata, cate2)
 
-def outputjson(eradata):
-    #bulid folder by yyyy-mm
-    folder_path = f'/home/ftp_246/data_1/news_data/era_news/{cate2}/' + time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-
-    filename = 'era_' + cate2 + time.strftime('%Y%m%d') + '.json'
-    with open(folder_path +'/'+filename,'w',encoding='utf8') as jf:
-        json.dump(eradata,jf,ensure_ascii=False,indent=2)
-    jf.close()
+def outputjson(eradata, cate2):
+    file_path = write_json_records(
+        records=eradata,
+        source_name='era_news',
+        category=cate2,
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='era',
+    )
+    print(f"saved: {file_path}")
     
 if __name__ == '__main__':
-    start_date = datetime.datetime.today()
-    d = datetime.timedelta(days=1)
-    end_date = (start_date - d).strftime('%Y-%m-%d')
+    end_date = build_end_date(days_back=1)
+    session = create_session()
 
     #categories
     cates = {('political','政治','politic'),
@@ -90,6 +101,6 @@ if __name__ == '__main__':
     
     for cate,cate1,cate2 in cates:
         url = f'http://www.eracom.com.tw/EraNews/Home/{cate}/'   
-        eranews(url)
+        eranews(session, url, cate1, cate2, end_date)
 
 

@@ -1,19 +1,28 @@
-import requests
 import time
-import datetime
 import os
-from bs4 import BeautifulSoup
-import json
+import sys
+from pathlib import Path
 
-def scrape_link(category,label,start_date,end_date):   
+from bs4 import BeautifulSoup
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import create_session, ensure_dir, write_json_records
+
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
+
+def scrape_link(session, category, label, start_date, end_date, delta):   
     urls = []
     while start_date.strftime('%Y%m%d') > end_date:
         page = 1
         while True:
             page_link = f'https://news.sina.com.tw/realtime/{category}/tw/'+\
                 start_date.strftime('%Y%m%d')+'/list-'+str(page)+'.html'           
-            time.sleep(3)
-            res = requests.get(page_link)
+            time.sleep(1)
+            res = session.get(page_link, timeout=20)
             soup = BeautifulSoup(res.text,'lxml')
             try:
                 items = soup.find_all('ul','realtime')[0].find_all('a')
@@ -26,17 +35,16 @@ def scrape_link(category,label,start_date,end_date):
                     link = 'https://news.sina.com.tw' + item['href']
                     urls.append(link)
                     
-            except:
+            except Exception:
                break
         start_date -= delta
     if len(urls)!=0:
         write_to_txt(category,urls)
-        scrape_content(label,urls)
+        scrape_content(session, category, label, urls)
         
 def write_to_txt(category,urls):
     folder_path = f'/home/ftp_246/data_1/news_data/sina/{category}/urls'
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
+    ensure_dir(folder_path)
     
     filename = f'sina-{category}-urls-'+time.strftime('%Y-%m-%d')+'.txt'
     with open(folder_path+'/'+filename,'w',encoding='utf-8') as txtf:
@@ -44,11 +52,11 @@ def write_to_txt(category,urls):
             txtf.write(url+'\n')
     txtf.close()
 
-def scrape_content(label,urls):
+def scrape_content(session, category, label, urls):
     data_collect = []
     for url in urls:
-        soup = BeautifulSoup(requests.get(url).text,'lxml')
-        time.sleep(3)
+        soup = BeautifulSoup(session.get(url, timeout=20).text,'lxml')
+        time.sleep(1)
         try:
             title = soup.find('h1').text.strip()
             source = soup.find('cite').a.text
@@ -57,12 +65,12 @@ def scrape_content(label,urls):
                               .strip()\
                               .lstrip('(')\
                               .rstrip(')')
-        except:
-            pass
+        except Exception:
+            continue
         
         try:
             content = soup.find(class_='pcont').text.replace('\n','').replace('\t','').strip()
-        except:
+        except Exception:
             content = ''
         article = {'url':url,'title':title,
                    'source':source,'date':date,
@@ -70,19 +78,23 @@ def scrape_content(label,urls):
         print(article)
         data_collect.append(article)
     if len(data_collect)!=0:
-        write_to_json(data_collect)
+        write_to_json(category, data_collect)
 
-def write_to_json(data_collect):
-    folder_path = f'/home/ftp_246/data_1/news_data/sina/{category}/'+time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-    filename = f'sina-{category}-'+time.strftime('%Y-%m-%d')+'.json'
-    with open(folder_path+'/'+filename,'w',encoding='utf-8') as jf:
-        json.dump(data_collect,jf,ensure_ascii=False,indent=2)
-    jf.close()
+def write_to_json(category, data_collect):
+    file_path = write_json_records(
+        records=data_collect,
+        source_name='sina',
+        category=category,
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='sina',
+    )
+    print(f"saved: {file_path}")
                         
 if __name__ == '__main__':
     #startdate enddate
+    import datetime
+
+    session = create_session()
     start_date = datetime.datetime.strptime(time.strftime('%Y%m%d'),'%Y%m%d')
     
     ten_days = datetime.timedelta(days=2)
@@ -97,5 +109,5 @@ if __name__ == '__main__':
                   ('finance' , '財經'),
                   ('tech'    , '科技')]
     for category,label in categories:
-        scrape_link(category,label,start_date,end_date)
+        scrape_link(session, category, label, start_date, end_date, delta)
 

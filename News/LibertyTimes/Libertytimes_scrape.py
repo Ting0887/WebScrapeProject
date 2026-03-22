@@ -1,22 +1,32 @@
-import requests
 import time
-import json
 import datetime
 from bs4 import BeautifulSoup
 import os
+import sys
+from pathlib import Path
 
-def scrape_link(label,category,page):
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import create_session, write_json_records
+
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
+
+def scrape_link(session, label, category, page, end_date):
     urls = []
     # 如果遇到健康類
     if 'health' in label:
         while True:
-            time.sleep(3)
+            time.sleep(1)
             url = f'https://health.ltn.com.tw/ajax/breakingNews/9/{page}'
             print(url)
-            res = requests.get(url,headers=headers)
+            res = session.get(url, timeout=20)
             if res.json()['data'] == []:
                 break
             else:
+                date_time = ''
                 for item in res.json()['data']:   
                     try:
                         link = item['url']
@@ -29,24 +39,25 @@ def scrape_link(label,category,page):
                         urls.append((title,link,date_time))  
                     except Exception as e:
                         pass
-            if date_time < end_date:
+            if date_time and date_time < end_date:
                 break
             else:
                 page += 1            
 
         if len(urls)!=0:
-            scrape_content(category,urls)
+            scrape_content(session, label, category, urls)
     
     #如果爬科技類    
     elif '3C' in label:
         while True:
-            time.sleep(3)
+            time.sleep(1)
             url = f'https://3c.ltn.com.tw/indexAjax/{page}'
             print(url)
-            res = requests.get(url,headers=headers)
+            res = session.get(url, timeout=20)
             if res.json() == []:
                 break
             else:
+                date_time = ''
                 for item in res.json():
                     try:
                         title = item['title']
@@ -59,25 +70,26 @@ def scrape_link(label,category,page):
                     except Exception as e:
                         print(e)
                         break
-            if date_time < end_date:
+            if date_time and date_time < end_date:
                 break
             page += 1
         # if have url
         if len(urls)!=0:
-            scrape_content(category,urls)
+            scrape_content(session, label, category, urls)
     #如果爬財經類              
     elif ('財經' in category) or\
          ('產業' in category) or\
          ('理財' in category) or\
          ('房產' in category):
         while True:
-            time.sleep(3)
+            time.sleep(1)
             url = f'https://ec.ltn.com.tw/list_ajax/{label}/{page}'
             print(url)
-            res = requests.get(url)
+            res = session.get(url, timeout=20)
             if res.json() == 1:
                 break
             else:
+                date_time = ''
                 for item in res.json():
                     try:
                         link = item['url']
@@ -89,23 +101,24 @@ def scrape_link(label,category,page):
                     except Exception as e:
                         print(e)
                         break
-            if date_time < end_date:
+            if date_time and date_time < end_date:
                 break
             page += 1
         # if have url
         if len(urls)!=0:
-            scrape_content(category,urls)
+            scrape_content(session, label, category, urls)
                       
     else:
         start = 20
         while True:
-            time.sleep(3)
+            time.sleep(1)
             url = f'https://news.ltn.com.tw/ajax/breakingnews/{label}/{page}'
             print(url)
-            res = requests.get(url) 
+            res = session.get(url, timeout=20) 
             if res.json()['data'] == []:
                 break
             elif page == 1:
+                date_time = ''
                 for item in res.json()['data']:
                     try:
                         link = item['url']
@@ -120,6 +133,7 @@ def scrape_link(label,category,page):
                         print(e)
                         break
             else:     
+                date_time = ''
                 for _id in range(start,start+20):
                     try:
                         link = res.json()['data'][str(_id)]['url']
@@ -133,30 +147,30 @@ def scrape_link(label,category,page):
                         print(e)
                         pass
                 start += 20
-            if date_time < end_date:
+            if date_time and date_time < end_date:
                 break
             page += 1
             
         # if have url
         if len(urls)!=0:
-            scrape_content(category,urls)
+            scrape_content(session, label, category, urls)
             
-def scrape_content(category,urls):
+def scrape_content(session, label, category, urls):
     data_collect = []
     for post in urls:
         title = post[0]
         link = post[1]
         date_time = post[2]
-        res = requests.get(link)
-        time.sleep(3)
+        res = session.get(link, timeout=20)
+        time.sleep(1)
         soup = BeautifulSoup(res.text,'lxml')
         
         content = ''
         if 'health' in label:
             try:
                 health_label = soup.select('.breadcrumbs')[0].find_all('a')[1].text
-            except:
-                pass
+            except Exception:
+                health_label = category
             items = soup.find_all('div','text boxTitle boxText')
             for item in items:
                 try:
@@ -180,7 +194,7 @@ def scrape_content(category,urls):
                            ('不用抽 不用搶' in c.text):
                             break
                     content += c.text.replace('\n','')
-            except:
+            except Exception:
                 continue
                                                       
         if '3C' in label:
@@ -189,7 +203,7 @@ def scrape_content(category,urls):
                 keywords= soup.select('.keyword')[0].find_all('a')
                 for k in keywords:
                     keyword += k.text + ' '
-            except:
+            except Exception:
                 pass
         elif 'health' in label:
             keyword = ''
@@ -197,7 +211,7 @@ def scrape_content(category,urls):
                 keywords = soup.select('ul.keyword')[0].find_all('a')
                 for k in keywords:
                     keyword += k.text + ' '
-            except:
+            except Exception:
                 pass
         else:
             keyword = ''
@@ -222,30 +236,27 @@ def scrape_content(category,urls):
     if len(data_collect)!=0:
         write_to_json(label,data_collect)
 
-def write_to_json(label,data_collect):
-    if ('strategy' in label) or ('international' in label) or\
-        ('investment' in label) or ('securities' in label) or\
-        ('estate' in label):
-            folder_path = '/home/ftp_246/data_1/news_data/LibertyTimes/finance/' + time.strftime('%Y-%m')
-    elif ('all' in label):
-        folder_path = '/home/ftp_246/data_1/news_data/LibertyTimes/realtime/' + time.strftime('%Y-%m')
-    else:
-        folder_path = f'/home/ftp_246/data_1/news_data/LibertyTimes/{label}/' + time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
+def resolve_output_category(label):
+    if ('strategy' in label) or ('international' in label) or ('investment' in label) or ('securities' in label) or ('estate' in label):
+        return 'finance'
+    if 'all' in label:
+        return 'realtime'
+    return label
 
-    file = 'liberty_' + label + time.strftime('%Y%m%d') + '.json'
-    with open(folder_path + '/' + file,'w',encoding='utf8') as f:
-        json.dump(data_collect,f,ensure_ascii=False,indent=2)
-    f.close()
+
+def write_to_json(label,data_collect):
+    file_path = write_json_records(
+        records=data_collect,
+        source_name='LibertyTimes',
+        category=resolve_output_category(label),
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='liberty',
+    )
+    print(f"saved: {file_path}")
 
 if __name__ == '__main__':
-    start_date = datetime.datetime.today()
-    d = datetime.timedelta(days=1)
-    end_date = (start_date - d).strftime('%Y/%m/%d')
-   
-    headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.121 Safari/537.36',
-           'x-requested-with': 'XMLHttpRequest'}
+    end_date = (datetime.datetime.today() - datetime.timedelta(days=1)).strftime('%Y/%m/%d')
+    session = create_session(headers={'x-requested-with': 'XMLHttpRequest'})
     
     categories = [('society','社會'),
                   ('world','國際'),
@@ -262,4 +273,4 @@ if __name__ == '__main__':
                   ]
     
     for label,category in categories:
-        scrape_link(label,category,page=1)
+        scrape_link(session, label, category, page=1, end_date=end_date)

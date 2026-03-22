@@ -1,24 +1,29 @@
 import os
-import re
-import random
-import json
 import time
-import requests
 import argparse
 from bs4 import BeautifulSoup
 from datetime import datetime, date, timedelta
 from urllib.parse import urljoin
+import sys
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import create_session, write_json_records
+
 
 HEADERS = {'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Safari/605.1.15'}
 
 
-month = time.strftime('%Y-%m')
-Nas_path = f'/home/ftp_246/data_1/news_data/TaipeiTimes'
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
 
 class TaipeiTimes():
     def __init__(self):
         self.domain_url = "https://www.taipeitimes.com/"
         self.cate_list = ['taiwan', 'world']
+        self.session = create_session(headers=HEADERS)
         
     def request_api(self, page, category):
         """
@@ -28,22 +33,20 @@ class TaipeiTimes():
         return:
             response json file
         """
-        resp = requests.get('https://www.taipeitimes.com/ajax_json/{}/list/{}'.format(page,category))
+        resp = self.session.get('https://www.taipeitimes.com/ajax_json/{}/list/{}'.format(page,category), timeout=20)
         return resp.json()
     
     def write_json_articles(self, category, data):
-        folder_path = Nas_path + '/' + category +'/'+ time.strftime('%Y-%m')
-        if not os.path.exists(folder_path):
-            os.makedirs(folder_path)
-
-        today = datetime.strftime(date.today(), "%Y%m%d")
-        filename = 'TaipeiTimes_' + category + '{}.json'.format(today)
-
         try:
-            with open(folder_path +'/'+ filename, 'w') as outfile:
-                json.dump(data, outfile, ensure_ascii=False,indent=2)
-                print("articles list write to json file successfully")
-        except:
+            file_path = write_json_records(
+                records=data,
+                source_name='TaipeiTimes',
+                category=category,
+                base_output_dir=OUTPUT_BASE_DIR,
+                file_prefix='TaipeiTimes',
+            )
+            print(f"saved: {file_path}")
+        except Exception:
             print("articles list write to json file fail")
     
     
@@ -79,7 +82,7 @@ class TaipeiTimes():
             articles = []
             for tt in self.category_list[category]:
                 # print('Now ', tt['newslink'])
-                resp = requests.get(tt['newslink'], headers=HEADERS)
+                resp = self.session.get(tt['newslink'], timeout=20)
                 if resp.status_code != 200:
                     print('BAD REQUEST')
                 else:
@@ -101,7 +104,7 @@ class TaipeiTimes():
                             'label': 'Taipei News',
                             'website': 'Taipei Times'
                         })
-                    except:
+                    except Exception:
                         print("Web page structure might change")
                 
                 # print(category, " is successful!")

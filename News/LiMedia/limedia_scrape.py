@@ -3,10 +3,19 @@ import os
 import time
 import datetime
 from bs4 import BeautifulSoup
-import json
-import requests
+import sys
+from pathlib import Path
 
-def scrape_link(cate,url,folder):
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import create_chrome_browser, create_session, write_json_records
+
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
+
+def scrape_link(browser, session, cate, url, folder, end_date):
     js = 'window.scrollTo(0, document.body.scrollHeight)'
     last_height = browser.execute_script("return document.body.scrollHeight")
     browser.get(url)
@@ -16,10 +25,11 @@ def scrape_link(cate,url,folder):
         soup = BeautifulSoup(browser.page_source,'lxml')
         bar = soup.find_all('div','td-ss-main-content')[0].find_all('div','td-block-span6')
 
+        date_time = ''
         for item in bar:
             try:
                 date_time = item.find('time').text
-            except:
+            except Exception:
                 pass
         time.sleep(3)
         if date_time < end_date:
@@ -45,16 +55,16 @@ def scrape_link(cate,url,folder):
         else:
             newsdata.append((title,author,date_time,link))
     if len(newsdata)!=0:
-        scrape_content(newsdata)
+        scrape_content(session, cate, folder, newsdata)
     
-def scrape_content(newsdata):
+def scrape_content(session, cate, folder, newsdata):
     article = []
     for item in newsdata:
         title = item[0]
         author = item[1]
         date_time = item[2]
         link = item[3]
-        res = requests.get(link,headers=headers)
+        res = session.get(link, timeout=20)
         time.sleep(2)
         soup = BeautifulSoup(res.text,'lxml')
         content = ''
@@ -62,7 +72,7 @@ def scrape_content(newsdata):
             contents = soup.find_all('p')
             for c in contents:
                 content += c.text.replace('\n','').replace('\r','')
-        except:
+        except Exception:
             print('no content')
 
         keyword = ''
@@ -70,7 +80,7 @@ def scrape_content(newsdata):
             keywords = soup.find_all('div','td-post-source-tags')[0].find_all('a')
             for k in keywords:
                 keyword += k.text + ' '
-        except:
+        except Exception:
             print('no keyword')
 
         article.append({'title':title,'author':author,
@@ -78,31 +88,26 @@ def scrape_content(newsdata):
                         'link':link,'content':content,
                         'keyword':keyword})
     if len(article)!=0:
-        write_to_json(article)
+        write_to_json(folder, article)
 
-def write_to_json(article):
-    folder_path = f'/home/ftp_246/data_1/news_data/limedia/{folder}/'+ time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-    
-    filename = 'limedia_'+folder+time.strftime('%Y%m%d')+'.json'
-    with open(folder_path+'/'+filename,'w',encoding='utf-8')  as jf:
-        json.dump(article,jf,ensure_ascii=False,indent=2)
-    jf.close()
+def write_to_json(folder, article):
+    file_path = write_json_records(
+        records=article,
+        source_name='limedia',
+        category=folder,
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='limedia',
+    )
+    print(f"saved: {file_path}")
 
 if __name__ == '__main__':
-    #headers
-    headers = {"referer": "https://www.limedia.tw/",
-            "cookie":"_ga=GA1.2.2123242271.1631784474; _gid=GA1.2.1716343220.1631784474; _gat=1",
-               "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.82 Safari/537.36"}
      #Start date,End date
     start_date = datetime.datetime.today() #today
     months = datetime.timedelta(days=1)  #last month
     end_date = (start_date - months).strftime('%Y-%m-%d')
     print(end_date)
+    session = create_session(headers={"referer": "https://www.limedia.tw/"})
 
-    #driver path
-    driverPath = '/home/cdna/chromedriver'
     #chromedriver setting
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument("--incognito")
@@ -124,7 +129,7 @@ if __name__ == '__main__':
 
     ua = "Mozilla/5.0 (Windows NT 10.0; WOW64; rv:53.0) Gecko/20100101 Firefox/53.0"
     chrome_options.add_argument("user-agent={}".format(ua))
-    browser = webdriver.Chrome(driverPath,options=chrome_options)
+    browser = create_chrome_browser(chrome_options)
     time.sleep(3)
 
     cate_url = [('大學社會責任','https://www.limedia.tw/category/usr/','society'),
@@ -133,6 +138,6 @@ if __name__ == '__main__':
                 ('藝文','https://www.limedia.tw/category/art/','art')]
 
     for cate,url,folder in cate_url:
-        scrape_link(cate,url,folder)
+        scrape_link(browser, session, cate, url, folder, end_date)
     browser.close()
 

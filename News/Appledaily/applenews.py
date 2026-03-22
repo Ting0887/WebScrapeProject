@@ -10,7 +10,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from News.common.scraper_utils import build_end_date, create_session, get_soup, join_text, write_json_records
+from News.common.scraper_utils import build_end_date, create_chrome_browser, create_session, get_soup, join_text, write_json_records
 
 
 OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
@@ -125,7 +125,6 @@ def outputjson(cate1, article):
 if __name__ == '__main__':
     end_date = build_end_date(days_back=1).replace('-', '/')
 
-    driverPath = '/home/cdna/chromedriver'
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument("--incognito")
@@ -137,7 +136,7 @@ if __name__ == '__main__':
     #chrome_options.add_argument('--disable-gpu')
     #chrome_options.add_argument("--disable-plugins")
     #chrome_options.add_argument("--in-process-plugins")
-    browser = webdriver.Chrome(driverPath,options=chrome_options)
+    browser = create_chrome_browser(chrome_options)
     session = create_session()
     cates = [('政治','politics'),('國際','international'),
              ('社會','local'),('生活','life'),('娛樂時尚','entertainment'),

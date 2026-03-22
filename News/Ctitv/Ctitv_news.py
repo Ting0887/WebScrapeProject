@@ -1,11 +1,19 @@
-import requests
-from bs4 import BeautifulSoup
-import time
-import datetime
 import os
-import json
+import sys
+from pathlib import Path
 
-def Ctitv(url):
+from bs4 import BeautifulSoup
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import build_end_date, create_session, write_json_records
+
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
+
+def Ctitv(session, url, cate, cate1, cate2, end_date):
     num = 1
     article = []
     while True: 
@@ -14,20 +22,23 @@ def Ctitv(url):
             print(base_url)
          except:
              continue
-         res = requests.get(base_url)
-         soup = BeautifulSoup(res.text,'lxml')
+         soup = BeautifulSoup(session.get(base_url, timeout=20).text,'lxml')
          items = soup.find_all('div','column half b-col')
+         if not items:
+             break
+
+         last_date_time = ''
          for item in items:
              title = extract_title(item)
              link = extract_link(item)
              label = cate
              print(link)
              try:
-                 res = requests.get(link)
-                 soup = BeautifulSoup(res.text,'lxml')
+                 soup = BeautifulSoup(session.get(link, timeout=20).text,'lxml')
                  
                  author = extract_author(soup)
                  date_time = extract_date(soup)
+                 last_date_time = date_time
                  content = extract_content(soup)
                  keyword = extract_keyword(soup)
 
@@ -36,14 +47,14 @@ def Ctitv(url):
                  else:
                      article.append({'date_time':date_time,'title':title,'author':author,
                                      'label':label,'link':link,'content':content,'keyword':keyword})
-             except:
+             except Exception:
                  continue
-         if date_time < end_date:
+         if last_date_time and last_date_time < end_date:
              break
          else:
              num += 1
     if len(article)!=0:
-        write_to_json(article)
+        write_to_json(cate2, article)
 
 def extract_title(item):
     try:
@@ -93,20 +104,18 @@ def extract_keyword(soup):
         pass
     return keyword
             
-def write_to_json(article):
-    #bulid folder yyyy-mm
-    folder_path = f'/home/ftp_246/data_1/news_data/Ctitv/{cate2}/' + time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-    filename = 'ctitv_' + cate2 + time.strftime('%Y%m%d') + '.json'
-    with open(folder_path +'/'+ filename,'w',encoding='utf8') as jf:
-        json.dump(article,jf,ensure_ascii=False,indent=2)
-    jf.close()
+def write_to_json(cate2, article):
+    file_path = write_json_records(
+        records=article,
+        source_name='Ctitv',
+        category=cate2,
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='ctitv',
+    )
+    print(f"saved: {file_path}")
 
 if __name__ == '__main__':
-    start_date = datetime.datetime.today()
-    d = datetime.timedelta(days = 1)
-    end_date = (start_date - d).strftime('%Y-%m-%d')
+    end_date = build_end_date(days_back=1)
     print(end_date)
     cates = [('政治要聞','politics-news','politics'),
             ('社會萬象','local-news','society'),
@@ -115,5 +124,6 @@ if __name__ == '__main__':
             ('健康新知','健康新知-2','health')]
 
     url = 'https://gotv.ctitv.com.tw/category/'
+    session = create_session()
     for cate,cate1,cate2 in cates:
-        Ctitv(url)
+        Ctitv(session, url, cate, cate1, cate2, end_date)

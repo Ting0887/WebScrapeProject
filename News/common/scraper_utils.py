@@ -70,6 +70,19 @@ def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
+def create_chrome_browser(chrome_options, driver_path: Optional[str] = None):
+    from selenium import webdriver
+    from selenium.webdriver.chrome.service import Service
+
+    resolved_driver_path = driver_path or os.environ.get("CHROMEDRIVER_PATH")
+    if resolved_driver_path:
+        return webdriver.Chrome(service=Service(resolved_driver_path), options=chrome_options)
+
+    from webdriver_manager.chrome import ChromeDriverManager
+
+    return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+
+
 def write_json_records(
     records,
     source_name: str,

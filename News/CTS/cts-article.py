@@ -2,12 +2,22 @@ import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
 import os
-import json
 import time
 import datetime
+import sys
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import create_chrome_browser, create_session, ensure_dir, write_json_records
 
 
-def scrape_link(category,label):
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
+
+
+def scrape_link(browser, session, category, label, end_date):
     urls = []
     js_down = 'window.scrollTo(0, document.body.scrollHeight)'
     last_height = browser.execute_script("return document.body.scrollHeight")
@@ -27,6 +37,7 @@ def scrape_link(category,label):
         try:
             soup = BeautifulSoup(browser.page_source,'lxml')
             articles = soup.find_all('div','newslist-container flexbox')[0].find_all('a')
+            dates = ''
             for article in articles:
                 link = article['href']
                 dates = link.split('/')[-1].split('.html')[0][0:8]
@@ -42,22 +53,20 @@ def scrape_link(category,label):
             print(e)
     if len(urls)!=0:
         write_to_txt(label,urls)
-        scrape_content(category,urls)
+        scrape_content(session, category, label, urls)
 
 def write_to_txt(label,urls):
-    #bulid folder yyyy-mm
-    folder_path =  '/home/ftp_246/data_1/news_data/CTS/urls/' + time.strftime('%Y-%m') 
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
+    folder_path = os.path.join(OUTPUT_BASE_DIR, 'CTS', 'urls', time.strftime('%Y-%m'))
+    ensure_dir(folder_path)
     with open(folder_path + '/'+f'cts-{label}-urls_'+time.strftime('%Y-%m-%d')+'.txt','w',encoding='utf-8') as txtf:
         for url in urls:
             txtf.write(url+'\n')
     txtf.close()
 
-def scrape_content(category,urls):
+def scrape_content(session, category, label, urls):
     data_collect = []
     for url in urls:
-        res = requests.get(url)
+        res = session.get(url, timeout=20)
         res.encoding = "utf-8"
         soup = BeautifulSoup(res.text,'lxml')
         try:
@@ -79,17 +88,18 @@ def scrape_content(category,urls):
         except Exception as e:
             print(e)
             pass
-    write_to_json(data_collect)
+    if len(data_collect) != 0:
+        write_to_json(label, data_collect)
 
-def write_to_json(data_collect):
-    #bulid folder yyyy-mm
-    folder_path = f'/home/ftp_246/data_1/news_data/CTS/json/{label}/' + time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-    filename = 'cts-'+label+'-'+time.strftime('%Y-%m-%d')+'.json'
-    with open(folder_path + '/' + filename,'w',encoding='utf-8') as jf:
-        json.dump(data_collect,jf,ensure_ascii=False,indent=2)
-    jf.close()
+def write_to_json(label, data_collect):
+    file_path = write_json_records(
+        records=data_collect,
+        source_name='CTS',
+        category=label,
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='cts',
+    )
+    print(f"saved: {file_path}")
     
 if __name__ == '__main__':
     start_date = datetime.datetime.today() #today
@@ -97,12 +107,12 @@ if __name__ == '__main__':
     end_date = (start_date - months).strftime('%Y%m%d')
     print(end_date)
 
-    driverPath = '/home/cdna/chromedriver'
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument('--headless')
     chrome_options.add_argument("--incognito")
     chrome_options.add_argument('--no-sandbox')
-    browser = webdriver.Chrome(driverPath,options=chrome_options)
+    browser = create_chrome_browser(chrome_options)
+    session = create_session()
 
     categories = [
                     ("政治" , "politics"),
@@ -113,4 +123,4 @@ if __name__ == '__main__':
                  ]
 
     for category, label in categories:
-        scrape_link(category,label)
+        scrape_link(browser, session, category, label, end_date)

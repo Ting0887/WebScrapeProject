@@ -1,30 +1,44 @@
 import os
-import datetime
 import time
-import json
-import requests
+import sys
+from pathlib import Path
+
 from bs4 import BeautifulSoup
 
-def scrape_link(label,url,foldername):
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import build_end_date, create_session, write_json_records
+
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
+
+def scrape_link(session, label, url, foldername, end_date):
     newsdata = []
     page = 1
     while True:
         page_url = url + '/page/' + str(page)
-        res = requests.get(page_url)
+        res = session.get(page_url, timeout=20)
         soup = BeautifulSoup(res.text,'lxml')
-        bar = soup.find_all('div','tipi-row content-bg clearfix')[0].find_all('div','preview-mini-wrap clearfix')
+        rows = soup.find_all('div','tipi-row content-bg clearfix')
+        if not rows:
+            break
+
+        bar = rows[0].find_all('div','preview-mini-wrap clearfix')
+        date_time = ''
         for item in bar:
             try:
                 title = item.find('h3','title').text
-            except:
+            except Exception:
                 title = ''
             try:
                 link = item.find('h3','title').a.get('href')
-            except:
+            except Exception:
                 link = ''
             try:
                 date_time = item.find('time')['datetime'][:10]
-            except:
+            except Exception:
                 date_time = ''
 
             if link != '' and date_time >= end_date:
@@ -40,27 +54,27 @@ def scrape_link(label,url,foldername):
         if '不好意思呢，找不到這個頁面' in mes:
             break
     if len(newsdata)!=0:
-        scrape_content(label,newsdata,foldername)
+        scrape_content(session, label, newsdata, foldername)
 
-def scrape_content(label,newsdata,foldername):
+def scrape_content(session, label, newsdata, foldername):
     article = []
     for item in newsdata:
         title = item[0]
         link = item[1]
         date_time = item[2]
 
-        res = requests.get(link)
+        res = session.get(link, timeout=20)
         soup = BeautifulSoup(res.text,'lxml')
         try:
             author = soup.find('span','byline-part author').text
-        except:
+        except Exception:
             author = ''
 
         content = ''
         try:
             content = soup.find('div','entry-content').text.replace('\n','')
-            content.split('延伸閱讀')[0]
-        except:
+            content = content.split('延伸閱讀')[0]
+        except Exception:
             print('no content!')
         
         keyword = ''
@@ -68,7 +82,7 @@ def scrape_content(label,newsdata,foldername):
             keywords = soup.find_all('div','post-tags')[0].find_all('a')
             for k in keywords:
                 keyword += k.text.replace('\n','').strip() + ' '
-        except:
+        except Exception:
             print('no keyword')
 
         article.append({'title':title,
@@ -84,20 +98,18 @@ def scrape_content(label,newsdata,foldername):
         write_to_json(article,foldername)
 
 def write_to_json(article,foldername):
-    folder_path = f'/home/ftp_246/data_1/news_data/Newsmarket/{foldername}'
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-
-    filename = f'newsmarket_{foldername}'+time.strftime('%Y%m%d')+'.json'
-    with open(folder_path +'/'+ filename,'w',encoding='utf-8')  as jf:
-        json.dump(article,jf,ensure_ascii=False,indent=2)
-    jf.close()
+    file_path = write_json_records(
+        records=article,
+        source_name='Newsmarket',
+        category=foldername,
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='newsmarket',
+    )
+    print(f"saved: {file_path}")
 
 if __name__ == '__main__':
-    #start date end date
-    start_date = datetime.datetime.today() #today
-    months = datetime.timedelta(days=1)  #last month
-    end_date = (start_date - months).strftime('%Y-%m-%d') 
+    session = create_session()
+    end_date = build_end_date(days_back=1)
     print(end_date)
 
     categories = [
@@ -107,4 +119,4 @@ if __name__ == '__main__':
                 ('綠生活-旅遊-國際通信','https://www.newsmarket.com.tw/blog/category/living-green-travel','living-green-travel')
                 ]
     for label,url,foldername in categories:
-        scrape_link(label,url,foldername)
+            scrape_link(session, label, url, foldername, end_date)

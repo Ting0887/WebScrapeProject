@@ -1,21 +1,34 @@
-import requests
 from bs4 import BeautifulSoup
-import json
 import time
-import datetime
 import os
+import sys
+from pathlib import Path
 
-def Newtalk(url):
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import build_end_date, create_session, write_json_records
+
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
+
+def Newtalk(session, url, cate, cate2, end_date):
     news_link = []
     page = 15
     for num in range(1,page+1):
         base_url = url + f'/{num}'
         print(base_url)
-        time.sleep(2.5)
-        res = requests.get(base_url,headers=headers)
+        time.sleep(1)
+        res = session.get(base_url, timeout=20)
         res.encoding = 'utf8'
         soup = BeautifulSoup(res.text,'lxml')
-        items = soup.find_all('div',{'id':'category'})[0].find_all('div','news-list-item clearfix')
+        categories = soup.find_all('div',{'id':'category'})
+        if not categories:
+            break
+
+        items = categories[0].find_all('div','news-list-item clearfix')
+        date_f = ''
         for item in items:
             link = item.find('a')['href']
             if 'plan' in link:
@@ -29,27 +42,27 @@ def Newtalk(url):
         if date_f < end_date:
             break
     if len(news_link)!=0:
-        parse_article(news_link)
+        parse_article(session, news_link, cate, cate2)
 
-def parse_article(news_link):
+def parse_article(session, news_link, cate, cate2):
     article = []
     for link in news_link:
-        time.sleep(2.6)
+        time.sleep(1)
         try:
-            res = requests.get(link,headers=headers)
+            res = session.get(link, timeout=20)
             res.encoding = 'utf8'
-        except:
+        except Exception:
             continue
         soup = BeautifulSoup(res.text,'lxml')
         try:
             title = soup.find('h1').text
-        except:
+        except Exception:
             title = ''
         
         try:
             date_time = soup.find('div','content_date').text\
                 .replace('發布','').replace('|','').strip()
-        except:
+        except Exception:
             date_time = ''
 
         label = cate
@@ -58,7 +71,7 @@ def parse_article(news_link):
             contents = soup.find_all('div',{'itemprop':'articleBody'})[0].find_all('p')
             for c in contents:
                 content += c.text
-        except:
+        except Exception:
             continue
         
         try:
@@ -66,30 +79,28 @@ def parse_article(news_link):
             keywords = soup.find_all('div','keyword_tag')[0].find_all('a')
             for k in keywords:
                 keyword += k.text + ' '
-        except:
-            continue
+        except Exception:
+            keyword = ''
         
         article.append({'date_time':date_time,'title':title,'label':label,
                         'link':link,'content':content,'keyword':keyword})
 
     if len(article) !=0:
-        outputjson(article)
-def outputjson(article):
-    #bulid folder yyyy-mm
-    folder_path = f'/home/ftp_246/data_1/news_data/NewTalk/{cate2}/' + time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
+        outputjson(article, cate2)
 
-    filename = 'newtalk_' + cate2 + time.strftime('%Y%m%d') + '.json'
-    with open(folder_path + '/' + filename,'w',encoding='utf8') as jf:
-        json.dump(article,jf,ensure_ascii=False,indent=2)
-    jf.close()
+def outputjson(article, cate2):
+    file_path = write_json_records(
+        records=article,
+        source_name='NewTalk',
+        category=cate2,
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='newtalk',
+    )
+    print(f"saved: {file_path}")
     
 if __name__ == '__main__':
-    headers = {"user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.61 Safari/537.36"}
-    start_date = datetime.datetime.today()
-    d = datetime.timedelta(days = 1)
-    end_date = (start_date - d).strftime('%Y-%m-%d')
+    session = create_session()
+    end_date = build_end_date(days_back=1)
 
     cates = [('政治','2','politics'),('社會','14','society'),
              ('國際','1','global'),('生活','5','life'),
@@ -97,4 +108,4 @@ if __name__ == '__main__':
 
     for cate,cate1,cate2 in cates:    
         url = f'https://newtalk.tw/news/subcategory/{cate1}/{cate}'
-        Newtalk(url)
+        Newtalk(session, url, cate, cate2, end_date)

@@ -2,46 +2,56 @@ import requests.packages.urllib3
 from bs4 import BeautifulSoup
 import time
 import datetime
-import json
 import os
+import sys
+from pathlib import Path
 
-start_date = datetime.datetime.today()
-d = datetime.timedelta(hours=12)
-end_date = (start_date - d).strftime('%Y-%m-%d %H:%M:%S')
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-headers = {"user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.82 Safari/537.36"}
+from News.common.scraper_utils import create_session, write_json_records
+
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
 
 requests.packages.urllib3.disable_warnings()
 
-def Scrape(cate,cate1,folder):
+def build_end_date(hours_back=12):
+    target_date = datetime.datetime.today() - datetime.timedelta(hours=hours_back)
+    return target_date.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def Scrape(session, cate, cate1, folder, end_date):
     datalist = []
     for num in range(1,17):
         url = f'https://news.pchome.com.tw/cat/{cate}/hot/{num}'
         print(url)
-        res = requests.get(url,headers=headers,verify=False)
+        res = session.get(url, verify=False, timeout=20)
         res.encoding = 'utf8'
         soup = BeautifulSoup(res.text,'lxml')
         items = soup.find_all('div','channel_newssection')
+        date_time = ''
         for item in items:
             try:
                 title = item.find('a')['title']  #title
                 print(title)
                 link = 'https://news.pchome.com.tw' + item.find('a')['href'] #link
                     
-                res = requests.get(link,headers=headers,verify=False)
+                res = session.get(link, verify=False, timeout=20)
                 soup = BeautifulSoup(res.text,'lxml')
                 date_time = soup.find('time')['datetime']  #date_time
                 author = soup.find('time').text.replace(date_time,'').strip() #author
                     
-                content = soup.find('div',{'calss':'article_text'}).text.replace('\n','').strip() #content
+                content = soup.find('div',{'class':'article_text'}).text.replace('\n','').strip() #content
                    
                 keyword = ''
                 keywords = soup.select('.ent_kw')[0].find_all('a')
                 for k in keywords:
                     keyword += k.text + ' '
                 print(keyword)              
-            except:
-                pass
+            except Exception:
+                continue
                 
             if date_time < end_date:
                 break
@@ -58,15 +68,18 @@ def Scrape(cate,cate1,folder):
         write_to_json(datalist,cate,folder)
 
 def write_to_json(datalist,cate,folder):
-    #build dictionary
-    folder_path = f'/home/ftp_246/data_1/news_data/PCHome/{folder}/' + time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-    filename = 'PCHome_' + cate + time.strftime('%Y%m%d%H') + '.json'
-    with open(folder_path + '/' + filename,'w',encoding='utf8') as f:
-        json.dump(datalist,f,ensure_ascii=False,indent=2)
+    file_path = write_json_records(
+        records=datalist,
+        source_name='PCHome',
+        category=folder,
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='PCHome',
+    )
+    print(f"saved: {file_path}")
 
 def main():
+    session = create_session()
+    end_date = build_end_date(hours_back=12)
     cates = [('politics','政治','politics'),
              ('society', '社會','society'),
              ('internation' , '國際','global'),
@@ -76,7 +89,7 @@ def main():
              ('science','科技','tech')]
 
     for cate,cate1,folder in cates:
-        Scrape(cate,cate1,folder)
+        Scrape(session, cate, cate1, folder, end_date)
 
 if __name__ == '__main__':
     main()

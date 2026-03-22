@@ -1,11 +1,20 @@
-import requests
 import os
-import time
 import datetime
-from bs4 import BeautifulSoup
-import json
+import sys
+from pathlib import Path
 
-def scrape_link(j):
+from bs4 import BeautifulSoup
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from News.common.scraper_utils import create_session, write_json_records
+
+
+OUTPUT_BASE_DIR = os.environ.get("NEWS_OUTPUT_DIR", "/home/ftp_246/data_1/news_data")
+
+def scrape_link(session, j):
     posts = []
     for item in j['items']:
         try:
@@ -22,9 +31,9 @@ def scrape_link(j):
             print(e)
             pass
     if len(posts)!=0:
-        scrape_info(posts)
+        scrape_info(session, posts)
 
-def scrape_info(posts):
+def scrape_info(session, posts):
     save_data = []
     for item in posts:
         #title id category source link date_time comment reply
@@ -35,11 +44,11 @@ def scrape_info(posts):
         link = item[4]
         date_time = item[5]
 
-        res = requests.get(link)
+        res = session.get(link, timeout=20)
         soup = BeautifulSoup(res.text,'lxml')
         try:
             content = soup.find('div','articleContent').text
-        except:
+        except Exception:
             content = ''
 
         keyword = ''
@@ -47,7 +56,7 @@ def scrape_info(posts):
             keywords = soup.find_all('div','exploreLinks-container')
             for k in keywords:
                 keyword += k.text + ' '
-        except:
+        except Exception:
             pass
 
         #scrape comment
@@ -56,46 +65,46 @@ def scrape_info(posts):
         pivot = 0
         while True:
             comment_api = f'https://today.line.me/webapi/comment/list?articleId={_id}&sort=POPULAR&direction=DESC&country=TW&limit=60&pivot={pivot}&postType=Article'
-            res = requests.get(comment_api)
+            res = session.get(comment_api, timeout=20)
             if res.json()['result']['comments']['comments'] == []:
                 break
-            for item in res.json()['result']['comments']['comments']:
+            for comment_item in res.json()['result']['comments']['comments']:
                 try:
-                    comment_name = item['displayName']
-                    comment_time = datetime.datetime.fromtimestamp(int(item['createdDate'])/1000).strftime('%Y-%m-%d %H:%M:%S')
+                    comment_name = comment_item['displayName']
+                    comment_time = datetime.datetime.fromtimestamp(int(comment_item['createdDate'])/1000).strftime('%Y-%m-%d %H:%M:%S')
                     comment_text = ''
-                    for c in item['contents']:
+                    for c in comment_item['contents']:
                         comment_text += c['extData']['content']
-                        comment_data.append({'comment_name':comment_name,
-                                             'comment_time':comment_time,
-                                             'comment_text':comment_text})
+                    comment_data.append({'comment_name':comment_name,
+                                         'comment_time':comment_time,
+                                         'comment_text':comment_text})
                 except Exception as e:
                     break
                 pivot += 30
 
                 #select reply link if reply !=0
                 try:
-                    reply_count = item['ext']['replyCount']
-                except:
+                    reply_count = comment_item['ext']['replyCount']
+                except Exception:
                     continue
                 if reply_count != 0:
-                    Sn = item['commentSn']
+                    Sn = comment_item['commentSn']
     
                     reply_link = f'https://today.line.me/webapi/comment/list?articleId={_id}&country=TW&limit=60&pivot=0&parentCommentSn={Sn}&postType=Article'
-                    res = requests.get(reply_link)
+                    res = session.get(reply_link, timeout=20)
                     if res.json()['result']['comments']['comments'] == []:
                         break
-                    for item in res.json()['result']['comments']['comments']:
+                    for reply_item in res.json()['result']['comments']['comments']:
                         try:
-                            reply_name = item['displayName']
-                            reply_time = datetime.datetime.fromtimestamp(int(item['createdDate'])/1000).strftime('%Y-%m-%d %H:%M:%S')
+                            reply_name = reply_item['displayName']
+                            reply_time = datetime.datetime.fromtimestamp(int(reply_item['createdDate'])/1000).strftime('%Y-%m-%d %H:%M:%S')
                             reply_text = ''
-                            for c in item['contents']:
+                            for c in reply_item['contents']:
                                 reply_text += c['extData']['content']
                             reply_data.append({'reply_name':reply_name,
                                                'reply_time':reply_time,
                                                'reply_text':reply_text})
-                        except:
+                        except Exception:
                             break
         
             save_data.append({'title':title,
@@ -111,17 +120,18 @@ def scrape_info(posts):
         write_to_json(save_data)
 
 def write_to_json(save_data):
-    folder_path = '/home/ftp_246/data_1/news_data/linetoday/'+time.strftime('%Y-%m')
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
-
-    filename = 'linetoday_recommendation' + time.strftime('%Y%m%d%H')+'.json'
-    with open(folder_path +'/'+ filename,'w',encoding='utf8') as jf:
-        json.dump(save_data,jf,ensure_ascii=False,indent=2)
-    jf.close()
+    file_path = write_json_records(
+        records=save_data,
+        source_name='linetoday',
+        category='recommendation',
+        base_output_dir=OUTPUT_BASE_DIR,
+        file_prefix='linetoday',
+    )
+    print(f"saved: {file_path}")
 
 if __name__ == '__main__':
     recom_url = 'https://today.line.me/webapi/api/v6/recommendation/articles/listings/mytoday_rec:id?offset=0&length=70&country=tw&gender=&age=&excludeNoThumbnail=0&containMainSnapshot=0'
-    res = requests.get(recom_url)
+    session = create_session()
+    res = session.get(recom_url, timeout=20)
     j = res.json()
-    scrape_link(j)
+    scrape_link(session, j)
